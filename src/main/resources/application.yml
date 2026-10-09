@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: transactions-service
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/transactions_db
+    username: transactions_user
+    password: transactions_password
+    pool:
+      enabled: true
+      initial-size: 5
+      max-size: 20
+      max-idle-time: 30m
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: redis_password
+      timeout: 5000ms
+      connect-timeout: 5000ms
+  webflux:
+    base-path: /api/transactions
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      transactionService:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+        recordExceptions:
+          - org.springframework.dao.DataAccessResourceFailureException
+          - java.util.concurrent.TimeoutException
+          - java.io.IOException
+          - java.lang.IllegalStateException
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    operationsSorter: alpha
+    tagsSorter: alpha
+    docExpansion: none

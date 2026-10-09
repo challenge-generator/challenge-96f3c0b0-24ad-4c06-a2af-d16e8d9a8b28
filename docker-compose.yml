@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: transactions-postgres
+    environment:
+      POSTGRES_DB: transactions_db
+      POSTGRES_USER: bankuser
+      POSTGRES_PASSWORD: bankpass123
+      POSTGRES_INITDB_ARGS: "-c max_connections=200 -c shared_buffers=256MB"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bankuser -d transactions_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - transactions-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    container_name: transactions-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - transactions-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: transactions-app
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_R2DBC_URL: r2dbc:postgresql://bankuser:bankpass123@postgres:5432/transactions_db
+      SPRING_R2DBC_USERNAME: bankuser
+      SPRING_R2DBC_PASSWORD: bankpass123
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_TIMEOUT: 2000ms
+      SPRING_DATA_REDIS_CONNECTION_TIMEOUT: 2000ms
+      SERVER_PORT: 8080
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,circuitbreakers
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: always
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_MAXIMUMNUMBEROFCALLS: 10
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_PERMITTEDNUMBEROFCALLSINHALFOPENSTATE: 3
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_WAITDURATIONINOPENSTATE: 30s
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_SLIDINGWINDOWTYPE: COUNT_BASED
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_SLIDINGWINDOWSIZE: 10
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_FAILURERATETHRESHOLD: 50
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_SLOWCALLRATETHRESHOLD: 100
+      RESILIENCE4J_CIRCUITBREAKER_CONFIG_DEFAULTCIRCUITBREAKER_SLOWCALLDURATIONTHRESHOLD: 2000ms
+      RESILIENCE4J_RETRY_CONFIG_DEFAULTRETRIES: 3
+      RESILIENCE4J_RETRY_CONFIG_DEFAULTWAITDURATION: 500ms
+      RESILIENCE4J_RETRY_CONFIG_DEFAULTENABLEEXCEPTIONFILTER: true
+      LOGGING_LEVEL_COM_BANK_TRANSACTIONS: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_DATA_R2DBC: DEBUG
+      LOGGING_LEVEL_IO_RESILIENCE4J: DEBUG
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - transactions-network
+    restart: on-failure:5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+networks:
+  transactions-network:
+    driver: bridge
+    name: transactions-network
+
+volumes:
+  postgres_data:
+    driver: local
+    name: transactions-postgres-data
+  redis_data:
+    driver: local
+    name: transactions-redis-data
